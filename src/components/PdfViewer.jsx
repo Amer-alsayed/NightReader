@@ -1,4 +1,6 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { List } from 'react-window';
+import { AutoSizer } from 'react-virtualized-auto-sizer';
 import * as pdfjsLib from 'pdfjs-dist/build/pdf.mjs';
 import 'pdfjs-dist/build/pdf.worker.mjs';
 import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Moon, Sun, X, Maximize, Minimize, Maximize2, Eye, EyeOff, PanelLeft, Scroll, BookOpen } from 'lucide-react';
@@ -124,6 +126,23 @@ const ScrollPageCanvas = ({ pdfDoc, pageNumber, scale, isDarkMode, containerWidt
 };
 
 // ── Main PdfViewer ──
+const ThumbnailRow = ({ index, style, pdfDoc, pageNum, isDarkMode, queueRenderPage }) => {
+    const pageNumber = index + 1;
+    return (
+        <div style={{ ...style, left: 0, width: '100%', padding: '0 8px', boxSizing: 'border-box' }}>
+            <Thumbnail
+                pdfDoc={pdfDoc}
+                pageNumber={pageNumber}
+                isActive={pageNum === pageNumber}
+                isDarkMode={isDarkMode}
+                onClick={queueRenderPage}
+            />
+        </div>
+    );
+};
+
+
+
 const PdfViewer = ({ file, onClose }) => {
     const [pdfDoc, setPdfDoc] = useState(null);
     const [pageNum, setPageNum] = useState(1);
@@ -504,16 +523,20 @@ const PdfViewer = ({ file, onClose }) => {
                     </button>
                 </div>
                 <div className="sidebar-thumbs">
-                    {pdfDoc && Array.from({ length: numPages }, (_, i) => (
-                        <Thumbnail
-                            key={i + 1}
-                            pdfDoc={pdfDoc}
-                            pageNumber={i + 1}
-                            isActive={pageNum === i + 1}
-                            isDarkMode={isDarkMode}
-                            onClick={(p) => { queueRenderPage(p); }}
-                        />
-                    ))}
+                    {pdfDoc && (
+                        <AutoSizer>
+                            {({ height, width }) => (
+                                <List
+                                    style={{ height, width }}
+                                    rowCount={numPages}
+                                    rowHeight={260}
+                                    rowProps={{ pdfDoc, pageNum, isDarkMode, queueRenderPage }}
+                                    rowComponent={ThumbnailRow}
+                                    className="sidebar-thumbs-list"
+                                />
+                            )}
+                        </AutoSizer>
+                    )}
                 </div>
             </div>
 
@@ -611,5 +634,6 @@ const PdfViewer = ({ file, onClose }) => {
         </div>
     );
 };
+
 
 export default PdfViewer;
