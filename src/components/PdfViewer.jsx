@@ -313,38 +313,37 @@ const PdfViewer = ({ file, onClose }) => {
 
     // Track scroll position in scroll mode to update current page indicator
     useEffect(() => {
-        if (viewMode !== 'scroll' || !scrollContainerRef.current) return;
+        if (viewMode !== "scroll" || !scrollContainerRef.current) return;
 
         const container = scrollContainerRef.current;
-        const handleScroll = () => {
-            if (isProgrammaticScrollRef.current) return;
+        const observer = new IntersectionObserver(
+            (entries) => {
+                if (isProgrammaticScrollRef.current) return;
 
-            const pages = container.querySelectorAll('.scroll-page');
-            const containerRect = container.getBoundingClientRect();
-            const containerCenter = containerRect.top + containerRect.height / 2;
+                entries.forEach((entry) => {
+                    if (entry.isIntersecting) {
+                        const pageNumber = parseInt(entry.target.dataset.page, 10);
+                        setPageNum(pageNumber);
+                        setPageInputValue(pageNumber.toString());
+                    }
+                });
+            },
+            {
+                root: container,
+                rootMargin: "-50% 0px -50% 0px", // Trigger when page crosses center line
+                threshold: 0
+            }
+        );
 
-            let closestPage = 1;
-            let closestDist = Infinity;
-            pages.forEach((el) => {
-                const rect = el.getBoundingClientRect();
-                const dist = Math.abs(rect.top + rect.height / 2 - containerCenter);
-                if (dist < closestDist) {
-                    closestDist = dist;
-                    closestPage = parseInt(el.dataset.page, 10);
-                }
-            });
+        const pages = container.querySelectorAll(".scroll-page");
+        pages.forEach((el) => observer.observe(el));
 
-            setPageNum(closestPage);
-            setPageInputValue(closestPage.toString());
-        };
-
-        container.addEventListener('scroll', handleScroll);
-        return () => container.removeEventListener('scroll', handleScroll);
-    }, [viewMode]);
+        return () => observer.disconnect();
+    }, [viewMode, numPages]);
 
     // Fix layout jumps: Sync scroll position when switching views or resizing zoom/fit in scroll mode
     useEffect(() => {
-        if (viewMode === 'scroll' && scrollContainerRef.current) {
+        if (viewMode === "scroll" && scrollContainerRef.current) {
             const container = scrollContainerRef.current;
             isProgrammaticScrollRef.current = true;
 
