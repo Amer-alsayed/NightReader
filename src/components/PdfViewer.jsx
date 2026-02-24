@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useLayoutEffect, useRef, useCallback } from 'react';
 import * as pdfjsLib from 'pdfjs-dist/build/pdf.mjs';
 import 'pdfjs-dist/build/pdf.worker.mjs';
 import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Moon, Sun, X, Maximize, Minimize, Maximize2, Eye, EyeOff, PanelLeft, Scroll, BookOpen } from 'lucide-react';
@@ -138,7 +138,7 @@ const PdfViewer = ({ file, onClose }) => {
     const [fitMode, setFitMode] = useState('page');
     const [isToolbarVisible, setIsToolbarVisible] = useState(true);
     const [focusModeUserOverride, setFocusModeUserOverride] = useState(false);
-    const [windowSize, setWindowSize] = useState({ w: window.innerWidth, h: window.innerHeight });
+    const [containerSize, setContainerSize] = useState({ w: window.innerWidth, h: window.innerHeight });
 
     // New states
     const [viewMode, setViewMode] = useState('slide'); // 'slide' or 'scroll'
@@ -159,6 +159,14 @@ const PdfViewer = ({ file, onClose }) => {
         stablePageNumRef.current = pageNum;
     }, [pageNum]);
 
+    // Immediate measurement for viewMode/sidebar changes
+    useLayoutEffect(() => {
+        const container = viewMode === 'slide' ? containerRef.current : scrollContainerRef.current;
+        if (container) {
+            setContainerSize({ w: container.clientWidth, h: container.clientHeight });
+        }
+    }, [viewMode, sidebarOpen]);
+
     // Track container resize (handles window resize AND sidebar toggle)
     useEffect(() => {
         const container = viewMode === 'slide' ? containerRef.current : scrollContainerRef.current;
@@ -169,8 +177,11 @@ const PdfViewer = ({ file, onClose }) => {
             clearTimeout(resizeTimeoutRef.current);
             resizeTimeoutRef.current = setTimeout(() => {
                 for (let entry of entries) {
-                    if (entry.contentRect) {
-                        setWindowSize({ w: entry.contentRect.width, h: entry.contentRect.height });
+                    if (entry.target) {
+                        setContainerSize({
+                            w: entry.target.clientWidth,
+                            h: entry.target.clientHeight
+                        });
                     }
                 }
             }, 150); // wait for 0.3s CSS transition to mostly finish
@@ -255,11 +266,10 @@ const PdfViewer = ({ file, onClose }) => {
                 if (!active) return;
 
                 let currentScale = scale;
-                if (fitMode !== 'custom' && containerRef.current) {
+                if (fitMode !== 'custom') {
                     const unscaledViewport = page.getViewport({ scale: 1 });
-                    const container = containerRef.current;
-                    const availableWidth = fitMode === 'width' ? container.clientWidth : container.clientWidth - 80;
-                    const availableHeight = container.clientHeight - 80 - 120;
+                    const availableWidth = fitMode === 'width' ? containerSize.w : containerSize.w - 80;
+                    const availableHeight = containerSize.h - 80 - 120;
 
                     const scaleForWidth = availableWidth / unscaledViewport.width;
                     const scaleForHeight = availableHeight / unscaledViewport.height;
@@ -309,7 +319,7 @@ const PdfViewer = ({ file, onClose }) => {
 
         renderPage(pageNum);
         return () => { active = false; };
-    }, [pdfDoc, pageNum, scale, fitMode, windowSize.w, windowSize.h, viewMode]);
+    }, [pdfDoc, pageNum, scale, fitMode, containerSize.w, containerSize.h, viewMode]);
 
     // Track scroll position in scroll mode to update current page indicator
     useEffect(() => {
@@ -478,8 +488,8 @@ const PdfViewer = ({ file, onClose }) => {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [pageNum, numPages, pageRendering, focusModeUserOverride]);
 
-    const containerWidth = containerRef.current?.clientWidth || scrollContainerRef.current?.clientWidth || windowSize.w;
-    const containerHeight = containerRef.current?.clientHeight || scrollContainerRef.current?.clientHeight || windowSize.h;
+    const containerWidth = containerSize.w;
+    const containerHeight = containerSize.h;
 
     return (
         <div ref={wrapperRef} className={`pdf-viewer-container animate-fade-in ${isFullscreen ? 'emulated-fullscreen' : ''}`}>
