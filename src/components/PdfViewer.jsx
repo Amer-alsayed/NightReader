@@ -10,6 +10,35 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 ).toString();
 
 // ── Thumbnail component ──
+
+/**
+ * Calculates the scale for fitting the PDF page into the container.
+ *
+ * @param {Object} page - The PDF page object.
+ * @param {string} fitMode - The current fit mode ('width', 'page', or 'custom').
+ * @param {number} containerWidth - The width of the container.
+ * @param {number} containerHeight - The height of the container.
+ * @param {number} currentScale - The current scale to fallback to.
+ * @returns {number} The calculated scale.
+ */
+const calculateFitScale = (page, fitMode, containerWidth, containerHeight, currentScale) => {
+    if (fitMode === 'custom' || !containerWidth || !containerHeight) {
+        return currentScale;
+    }
+
+    const unscaledViewport = page.getViewport({ scale: 1 });
+    const availableWidth = fitMode === 'width' ? containerWidth : containerWidth - 80;
+    const availableHeight = containerHeight - 80 - 120;
+
+    const scaleForWidth = availableWidth / unscaledViewport.width;
+    const scaleForHeight = availableHeight / unscaledViewport.height;
+
+    if (fitMode === 'width') return scaleForWidth;
+    if (fitMode === 'page') return Math.min(scaleForWidth, scaleForHeight);
+
+    return currentScale;
+};
+
 const Thumbnail = ({ pdfDoc, pageNumber, isActive, isDarkMode, onClick }) => {
     const canvasRef = useRef(null);
     const rendered = useRef(false);
@@ -59,18 +88,7 @@ const ScrollPageCanvas = ({ pdfDoc, pageNumber, scale, isDarkMode, containerWidt
                 const page = await pdfDoc.getPage(pageNumber);
                 if (!active || !canvasRef.current) return;
 
-                let currentScale = scale;
-                if (fitMode !== 'custom' && containerWidth && containerHeight) {
-                    const unscaledVP = page.getViewport({ scale: 1 });
-                    const availableWidth = fitMode === 'width' ? containerWidth : containerWidth - 80;
-                    const availableHeight = containerHeight - 80 - 120;
-
-                    const scaleForWidth = availableWidth / unscaledVP.width;
-                    const scaleForHeight = availableHeight / unscaledVP.height;
-
-                    if (fitMode === 'width') currentScale = scaleForWidth;
-                    else if (fitMode === 'page') currentScale = Math.min(scaleForWidth, scaleForHeight);
-                }
+                const currentScale = calculateFitScale(page, fitMode, containerWidth, containerHeight, scale);
 
                 const viewport = page.getViewport({ scale: currentScale });
                 const canvas = canvasRef.current;
@@ -254,19 +272,7 @@ const PdfViewer = ({ file, onClose }) => {
                 const page = await pdfDoc.getPage(num);
                 if (!active) return;
 
-                let currentScale = scale;
-                if (fitMode !== 'custom' && containerRef.current) {
-                    const unscaledViewport = page.getViewport({ scale: 1 });
-                    const container = containerRef.current;
-                    const availableWidth = fitMode === 'width' ? container.clientWidth : container.clientWidth - 80;
-                    const availableHeight = container.clientHeight - 80 - 120;
-
-                    const scaleForWidth = availableWidth / unscaledViewport.width;
-                    const scaleForHeight = availableHeight / unscaledViewport.height;
-
-                    if (fitMode === 'width') currentScale = scaleForWidth;
-                    else if (fitMode === 'page') currentScale = Math.min(scaleForWidth, scaleForHeight);
-                }
+                const currentScale = calculateFitScale(page, fitMode, containerRef.current?.clientWidth, containerRef.current?.clientHeight, scale);
 
                 const viewport = page.getViewport({ scale: currentScale });
                 const canvas = canvasRef.current;
