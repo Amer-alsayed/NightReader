@@ -10,7 +10,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 ).toString();
 
 // ── Thumbnail component ──
-const Thumbnail = ({ pdfDoc, pageNumber, isActive, isDarkMode, onClick }) => {
+const Thumbnail = React.memo(({ pdfDoc, pageNumber, isActive, isDarkMode, onClick }) => {
     const canvasRef = useRef(null);
     const rendered = useRef(false);
 
@@ -41,7 +41,7 @@ const Thumbnail = ({ pdfDoc, pageNumber, isActive, isDarkMode, onClick }) => {
             <span className="thumb-label">{pageNumber}</span>
         </button>
     );
-};
+});
 
 // ── Scroll-mode page canvas ──
 const ScrollPageCanvas = ({ pdfDoc, pageNumber, scale, isDarkMode, containerWidth, containerHeight, fitMode }) => {
@@ -128,6 +128,8 @@ const PdfViewer = ({ file, onClose }) => {
     const [pdfDoc, setPdfDoc] = useState(null);
     const [pageNum, setPageNum] = useState(1);
     const [pageRendering, setPageRendering] = useState(false);
+    const pageRenderingRef = useRef(false);
+    useEffect(() => { pageRenderingRef.current = pageRendering; }, [pageRendering]);
     const [pageNumPending, setPageNumPending] = useState(null);
     const [scale, setScale] = useState(1.5);
     const [isDarkMode, setIsDarkMode] = useState(true);
@@ -383,7 +385,7 @@ const PdfViewer = ({ file, onClose }) => {
         }
     }, [pageNum, sidebarOpen]);
 
-    const queueRenderPage = (num) => {
+    const queueRenderPage = useCallback((num) => {
         if (viewMode === 'scroll') {
             isProgrammaticScrollRef.current = true;
 
@@ -399,13 +401,13 @@ const PdfViewer = ({ file, onClose }) => {
             setTimeout(() => isProgrammaticScrollRef.current = false, 800);
             return;
         }
-        if (pageRendering) {
+        if (pageRenderingRef.current) {
             setPageNumPending(num);
         } else {
             setPageNum(num);
         }
         setPageInputValue(num.toString());
-    };
+    }, [viewMode]);
 
     const onPrevPage = () => { if (pageNum <= 1) return; queueRenderPage(pageNum - 1); };
     const onNextPage = () => { if (pageNum >= numPages) return; queueRenderPage(pageNum + 1); };
@@ -511,7 +513,7 @@ const PdfViewer = ({ file, onClose }) => {
                             pageNumber={i + 1}
                             isActive={pageNum === i + 1}
                             isDarkMode={isDarkMode}
-                            onClick={(p) => { queueRenderPage(p); }}
+                            onClick={queueRenderPage}
                         />
                     ))}
                 </div>
