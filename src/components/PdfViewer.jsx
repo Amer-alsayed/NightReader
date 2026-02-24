@@ -1,47 +1,15 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import * as pdfjsLib from 'pdfjs-dist/build/pdf.mjs';
 import 'pdfjs-dist/build/pdf.worker.mjs';
-import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Moon, Sun, X, Maximize, Minimize, Maximize2, Eye, EyeOff, PanelLeft, Scroll, BookOpen } from 'lucide-react';
+import { Eye } from 'lucide-react';
+import PdfSidebar from './PdfSidebar';
+import PdfToolbar from './PdfToolbar';
 import './PdfViewer.css';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
     'pdfjs-dist/build/pdf.worker.min.mjs',
     import.meta.url
 ).toString();
-
-// ── Thumbnail component ──
-const Thumbnail = ({ pdfDoc, pageNumber, isActive, isDarkMode, onClick }) => {
-    const canvasRef = useRef(null);
-    const rendered = useRef(false);
-
-    useEffect(() => {
-        if (!pdfDoc || rendered.current) return;
-        let active = true;
-
-        (async () => {
-            try {
-                const page = await pdfDoc.getPage(pageNumber);
-                if (!active || !canvasRef.current) return;
-                const vp = page.getViewport({ scale: 0.25 });
-                const canvas = canvasRef.current;
-                const ctx = canvas.getContext('2d');
-                canvas.width = vp.width;
-                canvas.height = vp.height;
-                await page.render({ canvasContext: ctx, viewport: vp }).promise;
-                rendered.current = true;
-            } catch (e) { /* ignore */ }
-        })();
-
-        return () => { active = false; };
-    }, [pdfDoc, pageNumber]);
-
-    return (
-        <button className={`thumb ${isActive ? 'thumb-active' : ''}`} onClick={() => onClick(pageNumber)} title={`Page ${pageNumber}`}>
-            <canvas ref={canvasRef} className={isDarkMode ? 'pdf-dark-mode-canvas' : ''} />
-            <span className="thumb-label">{pageNumber}</span>
-        </button>
-    );
-};
 
 // ── Scroll-mode page canvas ──
 const ScrollPageCanvas = ({ pdfDoc, pageNumber, scale, isDarkMode, containerWidth, containerHeight, fitMode }) => {
@@ -90,7 +58,7 @@ const ScrollPageCanvas = ({ pdfDoc, pageNumber, scale, isDarkMode, containerWidt
                 const transform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null;
 
                 if (renderTaskRef.current) {
-                    try { await renderTaskRef.current.cancel(); } catch (e) { }
+                    try { await renderTaskRef.current.cancel(); } catch { /* ignore */ }
                 }
 
                 renderTaskRef.current = page.render({ canvasContext: ctx, viewport, transform });
@@ -106,7 +74,7 @@ const ScrollPageCanvas = ({ pdfDoc, pageNumber, scale, isDarkMode, containerWidt
         return () => {
             active = false;
             if (renderTaskRef.current) {
-                try { renderTaskRef.current.cancel(); } catch (e) { }
+                try { renderTaskRef.current.cancel(); } catch { /* ignore */ }
             }
         };
     }, [pdfDoc, pageNumber, scale, containerWidth, containerHeight, fitMode]);
@@ -240,6 +208,7 @@ const PdfViewer = ({ file, onClose }) => {
             if (renderTaskRef.current) renderTaskRef.current.cancel();
             if (pdfDoc) pdfDoc.destroy();
         };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [file]);
 
     // Render current page in SLIDE mode
@@ -286,7 +255,7 @@ const PdfViewer = ({ file, onClose }) => {
                 const transform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null;
 
                 if (renderTaskRef.current) {
-                    try { await renderTaskRef.current.cancel(); } catch (e) { }
+                    try { await renderTaskRef.current.cancel(); } catch { /* ignore */ }
                 }
 
                 renderTaskRef.current = page.render({ canvasContext: ctx, transform, viewport });
@@ -309,6 +278,7 @@ const PdfViewer = ({ file, onClose }) => {
 
         renderPage(pageNum);
         return () => { active = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [pdfDoc, pageNum, scale, fitMode, windowSize.w, windowSize.h, viewMode]);
 
     // Track scroll position in scroll mode to update current page indicator
@@ -476,6 +446,7 @@ const PdfViewer = ({ file, onClose }) => {
         };
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [pageNum, numPages, pageRendering, focusModeUserOverride]);
 
     const containerWidth = containerRef.current?.clientWidth || scrollContainerRef.current?.clientWidth || windowSize.w;
@@ -496,94 +467,42 @@ const PdfViewer = ({ file, onClose }) => {
             )}
 
             {/* ── Sidebar ── */}
-            <div className={`pdf-sidebar ${sidebarOpen ? 'open' : ''}`}>
-                <div className="sidebar-header">
-                    <span className="sidebar-title">Pages</span>
-                    <button className="btn btn-icon" onClick={() => setSidebarOpen(false)} title="Close Sidebar">
-                        <X size={16} />
-                    </button>
-                </div>
-                <div className="sidebar-thumbs">
-                    {pdfDoc && Array.from({ length: numPages }, (_, i) => (
-                        <Thumbnail
-                            key={i + 1}
-                            pdfDoc={pdfDoc}
-                            pageNumber={i + 1}
-                            isActive={pageNum === i + 1}
-                            isDarkMode={isDarkMode}
-                            onClick={(p) => { queueRenderPage(p); }}
-                        />
-                    ))}
-                </div>
-            </div>
-
+            <PdfSidebar
+                isOpen={sidebarOpen}
+                onClose={() => setSidebarOpen(false)}
+                pdfDoc={pdfDoc}
+                numPages={numPages}
+                currentPage={pageNum}
+                isDarkMode={isDarkMode}
+                onThumbnailClick={(p) => { queueRenderPage(p); }}
+            />
             {/* ── Toolbar ── */}
-            <div
-                className={`pdf-toolbar glass-panel`}
-                style={{ opacity: isToolbarVisible ? 1 : 0, pointerEvents: isToolbarVisible ? 'auto' : 'none', transition: 'opacity 0.5s ease' }}
-            >
-                <button className="btn btn-icon" onClick={onClose} title="Close PDF"><X size={20} /></button>
+            <PdfToolbar
+                isVisible={isToolbarVisible}
+                onClose={onClose}
 
-                <div className="toolbar-divider"></div>
-
-                {/* Sidebar toggle */}
-                <button className="btn btn-icon" onClick={() => setSidebarOpen(!sidebarOpen)} title="Toggle Page Sidebar">
-                    <PanelLeft size={20} />
-                </button>
-
-                <div className="toolbar-divider"></div>
-
-                {/* Page navigation */}
-                <div className="page-controls">
-                    <button className="btn btn-icon" onClick={onPrevPage} disabled={pageNum <= 1} title="Previous Page">
-                        <ChevronLeft size={20} />
-                    </button>
-                    <span className="page-info" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <input type="text" value={pageInputValue} onChange={handlePageInputChange}
-                            onKeyDown={handlePageInputKeyDown} onBlur={handlePageInputBlur} className="page-input" />
-                        <span>/ {numPages || '-'}</span>
-                    </span>
-                    <button className="btn btn-icon" onClick={onNextPage} disabled={pageNum >= numPages} title="Next Page">
-                        <ChevronRight size={20} />
-                    </button>
-                </div>
-
-                <div className="toolbar-divider"></div>
-
-                {/* Zoom */}
-                <div className="zoom-controls">
-                    <button className="btn btn-icon" onClick={zoomOut} disabled={scale <= 0.5}><ZoomOut size={20} /></button>
-                    <span className="zoom-info">{Math.round(scale * 100)}%</span>
-                    <button className="btn btn-icon" onClick={zoomIn} disabled={scale >= 3.0}><ZoomIn size={20} /></button>
-                </div>
-
-                <div className="toolbar-divider"></div>
-
-                {/* View mode + fit + focus + fullscreen */}
-                <div className="fit-controls" style={{ display: 'flex', gap: '8px' }}>
-                    <button className={`btn btn-icon ${viewMode === 'scroll' ? 'btn-active' : ''}`} onClick={toggleViewMode} title={viewMode === 'slide' ? 'Switch to Scroll View' : 'Switch to Slide View'}>
-                        {viewMode === 'slide' ? <Scroll size={20} /> : <BookOpen size={20} />}
-                    </button>
-                    <button className="btn btn-icon" onClick={cycleFitMode} title={`Fit Mode: ${fitMode}`}>
-                        <Maximize2 size={20} />
-                    </button>
-                    <button className="btn btn-icon" onClick={toggleFocusMode} title="Focus Mode (Hide UI)">
-                        <EyeOff size={20} />
-                    </button>
-                    <button className="btn btn-icon" onClick={toggleFullscreen} title="Toggle Fullscreen">
-                        {isFullscreen ? <Minimize size={20} /> : <Maximize size={20} />}
-                    </button>
-                </div>
-
-                <div className="toolbar-divider"></div>
-
-                {/* Dark mode toggle */}
-                <button className={`btn ${isDarkMode ? 'btn-primary' : ''}`} onClick={toggleDarkMode}
-                    title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}>
-                    {isDarkMode ? <Moon size={20} /> : <Sun size={20} />}
-                    <span className="mode-text">{isDarkMode ? 'Dark' : 'Light'}</span>
-                </button>
-            </div>
+                onToggleSidebar={() => setSidebarOpen(!sidebarOpen)}
+                currentPage={pageNum}
+                numPages={numPages}
+                onPrevPage={onPrevPage}
+                onNextPage={onNextPage}
+                pageInputValue={pageInputValue}
+                onPageInputChange={handlePageInputChange}
+                onPageInputKeyDown={handlePageInputKeyDown}
+                onPageInputBlur={handlePageInputBlur}
+                scale={scale}
+                onZoomIn={zoomIn}
+                onZoomOut={zoomOut}
+                viewMode={viewMode}
+                onToggleViewMode={toggleViewMode}
+                fitMode={fitMode}
+                onCycleFitMode={cycleFitMode}
+                onToggleFocusMode={toggleFocusMode}
+                isFullscreen={isFullscreen}
+                onToggleFullscreen={toggleFullscreen}
+                isDarkMode={isDarkMode}
+                onToggleDarkMode={toggleDarkMode}
+            />
 
             {/* ── Content Area ── */}
             {viewMode === 'slide' ? (
