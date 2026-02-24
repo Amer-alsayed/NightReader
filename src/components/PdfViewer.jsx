@@ -3,6 +3,7 @@ import * as pdfjsLib from 'pdfjs-dist/build/pdf.mjs';
 import 'pdfjs-dist/build/pdf.worker.mjs';
 import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut, Moon, Sun, X, Maximize, Minimize, Maximize2, Eye, EyeOff, PanelLeft, Scroll, BookOpen } from 'lucide-react';
 import './PdfViewer.css';
+import { getFullscreenElement, requestFullscreen, exitFullscreen, FULLSCREEN_EVENTS } from '../utils/fullscreen';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
     'pdfjs-dist/build/pdf.worker.min.mjs',
@@ -188,11 +189,9 @@ const PdfViewer = ({ file, onClose }) => {
     // Fullscreen behavior and auto-hiding toolbar
     useEffect(() => {
         const handleFullscreenChange = () => {
-            const isFs = !!(document.fullscreenElement || document.webkitFullscreenElement || document.mozFullScreenElement || document.msFullscreenElement);
-            setIsFullscreen(isFs);
+            setIsFullscreen(!!getFullscreenElement());
         };
-        document.addEventListener('fullscreenchange', handleFullscreenChange);
-        document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+        FULLSCREEN_EVENTS.forEach(event => document.addEventListener(event, handleFullscreenChange));
 
         let timeout;
         const handleMouseMove = () => {
@@ -206,8 +205,7 @@ const PdfViewer = ({ file, onClose }) => {
         window.addEventListener('mousemove', handleMouseMove);
 
         return () => {
-            document.removeEventListener('fullscreenchange', handleFullscreenChange);
-            document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+            FULLSCREEN_EVENTS.forEach(event => document.removeEventListener(event, handleFullscreenChange));
             window.removeEventListener('mousemove', handleMouseMove);
             clearTimeout(timeout);
         };
@@ -417,18 +415,10 @@ const PdfViewer = ({ file, onClose }) => {
     const toggleFullscreen = async () => {
         const elem = document.documentElement;
         try {
-            if (!document.fullscreenElement) {
-                if (elem.requestFullscreen) {
-                    await elem.requestFullscreen();
-                } else if (elem.webkitRequestFullscreen) {
-                    await elem.webkitRequestFullscreen();
-                }
+            if (!getFullscreenElement()) {
+                await requestFullscreen(elem);
             } else {
-                if (document.exitFullscreen) {
-                    await document.exitFullscreen();
-                } else if (document.webkitExitFullscreen) {
-                    await document.webkitExitFullscreen();
-                }
+                await exitFullscreen();
             }
         } catch (err) {
             console.warn("Fullscreen API rejected, falling back to emulated fullscreen:", err);
