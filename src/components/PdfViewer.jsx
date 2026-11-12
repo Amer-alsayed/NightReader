@@ -9,6 +9,25 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
     import.meta.url
 ).toString();
 
+// Computes the render scale and exact CSS size for a page.
+// 'stretch' mode fills the whole container (non-uniform), so no scrolling is needed.
+const computeLayout = (page, fitMode, scale, cw, ch) => {
+    const vp1 = page.getViewport({ scale: 1 });
+    if (fitMode === 'stretch' && cw && ch) {
+        const w = Math.floor(cw), h = Math.floor(ch);
+        return { renderScale: w / vp1.width, cssW: w, cssH: h, yStretch: h / (vp1.height * (w / vp1.width)) };
+    }
+    let s = scale;
+    if (fitMode !== 'custom' && cw && ch) {
+        const availW = fitMode === 'width' ? cw : cw - 80;
+        const availH = ch - 80 - 120;
+        const sw = availW / vp1.width, sh = availH / vp1.height;
+        s = fitMode === 'width' ? sw : Math.min(sw, sh);
+    }
+    const vp = page.getViewport({ scale: s });
+    return { renderScale: s, cssW: Math.floor(vp.width), cssH: Math.floor(vp.height), yStretch: 1 };
+};
+
 // ── Thumbnail component ──
 const Thumbnail = ({ pdfDoc, pageNumber, isActive, isDarkMode, onClick }) => {
     const canvasRef = useRef(null);
@@ -59,36 +78,22 @@ const ScrollPageCanvas = ({ pdfDoc, pageNumber, scale, isDarkMode, containerWidt
                 const page = await pdfDoc.getPage(pageNumber);
                 if (!active || !canvasRef.current) return;
 
-                let currentScale = scale;
-                if (fitMode !== 'custom' && containerWidth && containerHeight) {
-                    const unscaledVP = page.getViewport({ scale: 1 });
-                    const availableWidth = fitMode === 'width' ? containerWidth : containerWidth - 80;
-                    const availableHeight = containerHeight - 80 - 120;
-
-                    const scaleForWidth = availableWidth / unscaledVP.width;
-                    const scaleForHeight = availableHeight / unscaledVP.height;
-
-                    if (fitMode === 'width') currentScale = scaleForWidth;
-                    else if (fitMode === 'page') currentScale = Math.min(scaleForWidth, scaleForHeight);
-                }
-
-                const viewport = page.getViewport({ scale: currentScale });
+                const L = computeLayout(page, fitMode, scale, containerWidth, containerHeight);
+                const viewport = page.getViewport({ scale: L.renderScale });
                 const canvas = canvasRef.current;
                 const ctx = canvas.getContext('2d');
                 const dpr = window.devicePixelRatio || 1;
 
-                // Only fade out if the dimensions actually changed drastically
-                if (Math.abs(canvas.width - Math.floor(viewport.width * dpr)) > 5) {
+                if (Math.abs(canvas.width - Math.floor(L.cssW * dpr)) > 5) {
                     setIsRendered(false);
                 }
 
-                canvas.width = Math.floor(viewport.width * dpr);
-                canvas.height = Math.floor(viewport.height * dpr);
-                canvas.style.width = Math.floor(viewport.width) + 'px';
-                canvas.style.height = Math.floor(viewport.height) + 'px';
+                canvas.width = Math.floor(L.cssW * dpr);
+                canvas.height = Math.floor(L.cssH * dpr);
+                canvas.style.width = L.cssW + 'px';
+                canvas.style.setProperty('height', L.cssH + 'px', 'important');
 
-                const transform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null;
-
+                const transform = [dpr, 0, 0, dpr * L.yStretch, 0, 0];
                 if (renderTaskRef.current) {
                     try { await renderTaskRef.current.cancel(); } catch (e) { }
                 }
@@ -254,37 +259,23 @@ const PdfViewer = ({ file, onClose }) => {
                 const page = await pdfDoc.getPage(num);
                 if (!active) return;
 
-                let currentScale = scale;
-                if (fitMode !== 'custom' && containerRef.current) {
-                    const unscaledViewport = page.getViewport({ scale: 1 });
-                    const container = containerRef.current;
-                    const availableWidth = fitMode === 'width' ? container.clientWidth : container.clientWidth - 80;
-                    const availableHeight = container.clientHeight - 80 - 120;
-
-                    const scaleForWidth = availableWidth / unscaledViewport.width;
-                    const scaleForHeight = availableHeight / unscaledViewport.height;
-
-                    if (fitMode === 'width') currentScale = scaleForWidth;
-                    else if (fitMode === 'page') currentScale = Math.min(scaleForWidth, scaleForHeight);
-                }
-
-                const viewport = page.getViewport({ scale: currentScale });
+                const container = containerRef.current;
+                const L = computeLayout(page, fitMode, scale, container?.clientWidth, container?.clientHeight);
+                const viewport = page.getViewport({ scale: L.renderScale });
                 const canvas = canvasRef.current;
                 const ctx = canvas.getContext('2d');
                 const dpr = window.devicePixelRatio || 1;
 
-                // Temporarily hide canvas during heavy resize to avoid flash of unscaled content
-                if (Math.abs(canvas.width - Math.floor(viewport.width * dpr)) > 5) {
+                if (Math.abs(canvas.width - Math.floor(L.cssW * dpr)) > 5) {
                     canvas.style.opacity = '0';
                 }
 
-                canvas.width = Math.floor(viewport.width * dpr);
-                canvas.height = Math.floor(viewport.height * dpr);
-                canvas.style.width = Math.floor(viewport.width) + 'px';
-                canvas.style.height = Math.floor(viewport.height) + 'px';
+                canvas.width = Math.floor(L.cssW * dpr);
+                canvas.height = Math.floor(L.cssH * dpr);
+                canvas.style.width = L.cssW + 'px';
+                canvas.style.setProperty('height', L.cssH + 'px', 'important');
 
-                const transform = dpr !== 1 ? [dpr, 0, 0, dpr, 0, 0] : null;
-
+                const transform = [dpr, 0, 0, dpr * L.yStretch, 0, 0];
                 if (renderTaskRef.current) {
                     try { await renderTaskRef.current.cancel(); } catch (e) { }
                 }
@@ -446,7 +437,8 @@ const PdfViewer = ({ file, onClose }) => {
 
     const cycleFitMode = () => {
         if (fitMode === 'page') setFitMode('width');
-        else if (fitMode === 'width') setFitMode('custom');
+        else if (fitMode === 'width') setFitMode('stretch');
+        else if (fitMode === 'stretch') setFitMode('custom');
         else setFitMode('page');
     };
 
@@ -564,7 +556,7 @@ const PdfViewer = ({ file, onClose }) => {
                     <button className={`btn btn-icon ${viewMode === 'scroll' ? 'btn-active' : ''}`} onClick={toggleViewMode} title={viewMode === 'slide' ? 'Switch to Scroll View' : 'Switch to Slide View'}>
                         {viewMode === 'slide' ? <Scroll size={20} /> : <BookOpen size={20} />}
                     </button>
-                    <button className="btn btn-icon" onClick={cycleFitMode} title={`Fit Mode: ${fitMode}`}>
+                    <button className="btn btn-icon" onClick={cycleFitMode} title={`Fit Mode: ${fitMode} (click to cycle: page / width / stretch / custom)`}>
                         <Maximize2 size={20} />
                     </button>
                     <button className="btn btn-icon" onClick={toggleFocusMode} title="Focus Mode (Hide UI)">
@@ -587,12 +579,12 @@ const PdfViewer = ({ file, onClose }) => {
 
             {/* ── Content Area ── */}
             {viewMode === 'slide' ? (
-                <div key="slide" className={`pdf-canvas-container animate-crossfade ${fitMode === 'width' ? 'fit-width' : ''}`} ref={containerRef}>
+                <div key="slide" className={`pdf-canvas-container animate-crossfade ${fitMode === 'width' ? 'fit-width' : ''} ${fitMode === 'stretch' ? 'fit-stretch' : ''}`} ref={containerRef}>
                     {!pdfDoc && <div className="loading-indicator pulse">Loading Document...</div>}
                     <canvas ref={canvasRef} className={isDarkMode ? 'pdf-dark-mode-canvas' : 'pdf-light-mode-canvas'} />
                 </div>
             ) : (
-                <div key="scroll" className={`pdf-canvas-container scroll-view animate-crossfade ${fitMode === 'width' ? 'fit-width' : ''}`} ref={scrollContainerRef}>
+                <div key="scroll" className={`pdf-canvas-container scroll-view animate-crossfade ${fitMode === 'width' ? 'fit-width' : ''} ${fitMode === 'stretch' ? 'fit-stretch' : ''}`} ref={scrollContainerRef}>
                     {!pdfDoc && <div className="loading-indicator pulse">Loading Document...</div>}
                     {pdfDoc && Array.from({ length: numPages }, (_, i) => (
                         <ScrollPageCanvas
