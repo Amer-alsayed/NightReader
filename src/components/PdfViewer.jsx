@@ -11,13 +11,16 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 
 const MAX_CANVAS_DIM = 4096;
 
-// Use exact devicePixelRatio (capped by GPU canvas limits) so canvas pixels map 1:1
-// to physical screen pixels without fractional downsampling blur.
+// Use exact integer multiple of devicePixelRatio (2x on standard 1x/1.25x/1.5x screens,
+// 1x on >=2x Retina screens) so even narrow split-screen pages rasterize at high
+// resolution while mapping cleanly to physical screen pixels without fractional blur.
 const computeOutputScale = (cssW, cssH) => {
     const dpr = window.devicePixelRatio || 1;
+    const oversample = dpr < 2 ? 2 : 1;
+    const desired = dpr * oversample;
     const maxW = MAX_CANVAS_DIM / Math.max(cssW, 1);
     const maxH = MAX_CANVAS_DIM / Math.max(cssH, 1);
-    return Math.max(1, Math.min(dpr, maxW, maxH));
+    return Math.max(1, Math.min(desired, maxW, maxH));
 };
 
 // Computes the render scale and exact CSS size for a page.
