@@ -9,6 +9,19 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
     import.meta.url
 ).toString();
 
+const MAX_CANVAS_DIM = 4096;
+const MIN_BACKING_WIDTH = 1440;
+
+// Computes a high-DPI supersampling factor so PDF text and diagrams stay razor-sharp
+// even in narrow split-screen viewports or 1x displays, while staying within GPU canvas limits.
+const computeOutputScale = (cssW, cssH) => {
+    const dpr = window.devicePixelRatio || 1;
+    const desired = Math.max(dpr, 2, MIN_BACKING_WIDTH / Math.max(cssW, 1));
+    const maxW = MAX_CANVAS_DIM / Math.max(cssW, 1);
+    const maxH = MAX_CANVAS_DIM / Math.max(cssH, 1);
+    return Math.max(1, Math.min(desired, maxW, maxH, 4));
+};
+
 // Computes the render scale and exact CSS size for a page.
 // 'stretch' mode fills the whole container (non-uniform), so no scrolling is needed.
 const computeLayout = (page, fitMode, scale, cw, ch) => {
@@ -19,8 +32,11 @@ const computeLayout = (page, fitMode, scale, cw, ch) => {
     }
     let s = scale;
     if (fitMode !== 'custom' && cw && ch) {
-        const availW = fitMode === 'width' ? cw : cw - 80;
-        const availH = ch - 80 - 120;
+        const isNarrow = cw < 768;
+        const padX = fitMode === 'width' ? (isNarrow ? 16 : 32) : (isNarrow ? 24 : 80);
+        const padY = isNarrow ? 110 : 160;
+        const availW = Math.max(cw - padX, 100);
+        const availH = Math.max(ch - padY, 100);
         const sw = availW / vp1.width, sh = availH / vp1.height;
         s = fitMode === 'width' ? sw : Math.min(sw, sh);
     }
@@ -41,12 +57,13 @@ const Thumbnail = ({ pdfDoc, pageNumber, isActive, isDarkMode, onClick }) => {
             try {
                 const page = await pdfDoc.getPage(pageNumber);
                 if (!active || !canvasRef.current) return;
+                const dpr = Math.max(window.devicePixelRatio || 1, 2);
                 const vp = page.getViewport({ scale: 0.25 });
                 const canvas = canvasRef.current;
                 const ctx = canvas.getContext('2d');
-                canvas.width = vp.width;
-                canvas.height = vp.height;
-                await page.render({ canvasContext: ctx, viewport: vp }).promise;
+                canvas.width = Math.floor(vp.width * dpr);
+                canvas.height = Math.floor(vp.height * dpr);
+                await page.render({ canvasContext: ctx, viewport: vp, transform: [dpr, 0, 0, dpr, 0, 0] }).promise;
                 rendered.current = true;
             } catch (e) { /* ignore */ }
         })();
@@ -64,13 +81,47 @@ const Thumbnail = ({ pdfDoc, pageNumber, isActive, isDarkMode, onClick }) => {
 
 // ── Scroll-mode page canvas ──
 const ScrollPageCanvas = ({ pdfDoc, pageNumber, scale, isDarkMode, containerWidth, containerHeight, fitMode }) => {
+    const wrapperRef = useRef(null);
     const canvasRef = useRef(null);
     const renderTaskRef = useRef(null);
 
     const [isRendered, setIsRendered] = useState(false);
+    const [isNearViewport, setIsNearViewport] = useState(pageNumber <= 3);
+    const [pageSize, setPageSize] = useState({ w: 0, h: 0 });
+
+    // Lazy-track visibility so high-DPI pages only rasterize near the viewport
+    useEffect(() => {
+        const el = wrapperRef.current;
+        if (!el) return;
+        const observer = new IntersectionObserver(
+            ([entry]) => {
+                if (entry.isIntersecting) {
+                    setIsNearViewport(true);
+                }
+            },
+            { rootMargin: '800px 0px' }
+        );
+        observer.observe(el);
+        return () => observer.disconnect();
+    }, []);
+
+    // Reserve exact layout dimensions even before rendering
+    useEffect(() => {
+        if (!pdfDoc) return;
+        let active = true;
+        (async () => {
+            try {
+                const page = await pdfDoc.getPage(pageNumber);
+                if (!active) return;
+                const L = computeLayout(page, fitMode, scale, containerWidth, containerHeight);
+                setPageSize({ w: L.cssW, h: L.cssH });
+            } catch { /* ignore */ }
+        })();
+        return () => { active = false; };
+    }, [pdfDoc, pageNumber, scale, containerWidth, containerHeight, fitMode]);
 
     useEffect(() => {
-        if (!pdfDoc || !canvasRef.current) return;
+        if (!pdfDoc || !canvasRef.current || !isNearViewport) return;
         let active = true;
 
         (async () => {
@@ -82,18 +133,21 @@ const ScrollPageCanvas = ({ pdfDoc, pageNumber, scale, isDarkMode, containerWidt
                 const viewport = page.getViewport({ scale: L.renderScale });
                 const canvas = canvasRef.current;
                 const ctx = canvas.getContext('2d');
-                const dpr = window.devicePixelRatio || 1;
+                const outputScale = computeOutputScale(L.cssW, L.cssH);
 
-                if (Math.abs(canvas.width - Math.floor(L.cssW * dpr)) > 5) {
+                const targetW = Math.floor(L.cssW * outputScale);
+                const targetH = Math.floor(L.cssH * outputScale);
+
+                if (Math.abs(canvas.width - targetW) > 5) {
                     setIsRendered(false);
                 }
 
-                canvas.width = Math.floor(L.cssW * dpr);
-                canvas.height = Math.floor(L.cssH * dpr);
+                canvas.width = targetW;
+                canvas.height = targetH;
                 canvas.style.width = L.cssW + 'px';
-                canvas.style.setProperty('height', L.cssH + 'px', 'important');
+                canvas.style.height = L.cssH + 'px';
 
-                const transform = [dpr, 0, 0, dpr * L.yStretch, 0, 0];
+                const transform = [outputScale, 0, 0, outputScale * L.yStretch, 0, 0];
                 if (renderTaskRef.current) {
                     try { await renderTaskRef.current.cancel(); } catch (e) { }
                 }
@@ -114,13 +168,18 @@ const ScrollPageCanvas = ({ pdfDoc, pageNumber, scale, isDarkMode, containerWidt
                 try { renderTaskRef.current.cancel(); } catch (e) { }
             }
         };
-    }, [pdfDoc, pageNumber, scale, containerWidth, containerHeight, fitMode]);
+    }, [pdfDoc, pageNumber, scale, containerWidth, containerHeight, fitMode, isNearViewport]);
 
     return (
-        <div className="scroll-page" data-page={pageNumber}>
+        <div
+            ref={wrapperRef}
+            className="scroll-page"
+            data-page={pageNumber}
+            style={pageSize.w ? { width: pageSize.w + 'px', minHeight: pageSize.h + 'px' } : undefined}
+        >
             <canvas
                 ref={canvasRef}
-                className={isDarkMode ? 'pdf-dark-mode-canvas' : 'pdf-light-mode-canvas'}
+                className={`pdf-page-canvas ${isDarkMode ? 'pdf-dark-mode-canvas' : 'pdf-light-mode-canvas'}`}
                 style={{ opacity: isRendered ? 1 : 0 }}
             />
             <div className="scroll-page-number">{pageNumber}</div>
@@ -164,10 +223,13 @@ const PdfViewer = ({ file, onClose }) => {
         stablePageNumRef.current = pageNum;
     }, [pageNum]);
 
-    // Track container resize (handles window resize AND sidebar toggle)
+    // Track container resize (handles window resize, split-screen, AND sidebar toggle)
     useEffect(() => {
         const container = viewMode === 'slide' ? containerRef.current : scrollContainerRef.current;
         if (!container) return;
+
+        // Measure immediately on mount or viewMode switch
+        setWindowSize({ w: container.clientWidth, h: container.clientHeight });
 
         resizeObserverRef.current = new ResizeObserver((entries) => {
             // Debounce the resize to prevent jitter during the CSS transition
@@ -175,10 +237,10 @@ const PdfViewer = ({ file, onClose }) => {
             resizeTimeoutRef.current = setTimeout(() => {
                 for (let entry of entries) {
                     if (entry.contentRect) {
-                        setWindowSize({ w: entry.contentRect.width, h: entry.contentRect.height });
+                        setWindowSize({ w: entry.target.clientWidth, h: entry.target.clientHeight });
                     }
                 }
-            }, 150); // wait for 0.3s CSS transition to mostly finish
+            }, 120);
         });
 
         resizeObserverRef.current.observe(container);
@@ -187,7 +249,7 @@ const PdfViewer = ({ file, onClose }) => {
             if (resizeObserverRef.current) resizeObserverRef.current.disconnect();
             clearTimeout(resizeTimeoutRef.current);
         };
-    }, [viewMode, sidebarOpen]); // re-bind if viewMode changes
+    }, [viewMode, sidebarOpen]);
 
 
     // Fullscreen behavior and auto-hiding toolbar
@@ -581,7 +643,7 @@ const PdfViewer = ({ file, onClose }) => {
             {viewMode === 'slide' ? (
                 <div key="slide" className={`pdf-canvas-container animate-crossfade ${fitMode === 'width' ? 'fit-width' : ''} ${fitMode === 'stretch' ? 'fit-stretch' : ''}`} ref={containerRef}>
                     {!pdfDoc && <div className="loading-indicator pulse">Loading Document...</div>}
-                    <canvas ref={canvasRef} className={isDarkMode ? 'pdf-dark-mode-canvas' : 'pdf-light-mode-canvas'} />
+                    <canvas ref={canvasRef} className={`pdf-page-canvas ${isDarkMode ? 'pdf-dark-mode-canvas' : 'pdf-light-mode-canvas'}`} />
                 </div>
             ) : (
                 <div key="scroll" className={`pdf-canvas-container scroll-view animate-crossfade ${fitMode === 'width' ? 'fit-width' : ''} ${fitMode === 'stretch' ? 'fit-stretch' : ''}`} ref={scrollContainerRef}>

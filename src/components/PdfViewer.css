@@ -120,6 +120,7 @@
     align-items: center;
     gap: 12px;
     padding: 12px 24px;
+    max-width: calc(100vw - 24px);
     z-index: 100;
     transition: opacity 0.3s ease, transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
@@ -129,6 +130,7 @@
     height: 24px;
     background-color: var(--panel-border);
     margin: 0 4px;
+    flex-shrink: 0;
 }
 
 .page-controls,
@@ -136,14 +138,46 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    flex-shrink: 0;
 }
 
 .page-info,
 .zoom-info {
     font-variant-numeric: tabular-nums;
     font-weight: 500;
-    min-width: 60px;
+    min-width: 48px;
     text-align: center;
+    white-space: nowrap;
+}
+
+@media (max-width: 767px) {
+    .pdf-toolbar {
+        bottom: 14px;
+        gap: 6px;
+        padding: 8px 12px;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+
+    .pdf-toolbar::-webkit-scrollbar {
+        display: none;
+    }
+
+    .toolbar-divider {
+        margin: 0 2px;
+        height: 20px;
+    }
+
+    .page-controls,
+    .zoom-controls {
+        gap: 4px;
+    }
+
+    .page-info,
+    .zoom-info {
+        min-width: auto;
+        font-size: 13px;
+    }
 }
 
 .page-input {
@@ -188,7 +222,7 @@
     flex: 1;
     overflow: auto;
     display: flex;
-    justify-content: center;
+    justify-content: flex-start;
     align-items: flex-start;
     padding: 40px;
     padding-bottom: 120px;
@@ -198,14 +232,25 @@
 
 .pdf-canvas-container.scroll-view {
     flex-direction: column;
-    align-items: center;
+    align-items: flex-start;
     justify-content: flex-start;
     gap: 24px;
 }
 
 .pdf-canvas-container.fit-width {
-    padding-left: 0;
-    padding-right: 0;
+    padding-left: 16px;
+    padding-right: 16px;
+}
+
+@media (max-width: 767px) {
+    .pdf-canvas-container {
+        padding: 16px 12px 96px 12px;
+    }
+
+    .pdf-canvas-container.fit-width {
+        padding-left: 8px;
+        padding-right: 8px;
+    }
 }
 
 .pdf-canvas-container::-webkit-scrollbar {
@@ -232,11 +277,12 @@
     flex-direction: column;
     align-items: center;
     position: relative;
+    margin: 0 auto;
+    flex-shrink: 0;
 }
 
 .scroll-page canvas {
     border-radius: 4px;
-    max-width: 100%;
 }
 
 .scroll-page-number {
@@ -248,17 +294,15 @@
     opacity: 0.5;
 }
 
-/* ── Single page canvas ── */
-canvas {
+/* ── PDF page canvas ── */
+.pdf-page-canvas {
+    display: block;
+    margin: 0 auto;
+    flex-shrink: 0;
     border-radius: 4px;
-    will-change: transform, filter, width, height, opacity;
-    max-width: 100%;
-    height: auto !important;
     background-color: #ffffff;
     /* Falls back to solid white which then inverts to black, preventing bright flashes */
-    transition: width 0.3s cubic-bezier(0.25, 1, 0.5, 1),
-        height 0.3s cubic-bezier(0.25, 1, 0.5, 1),
-        opacity 0.4s ease-in-out;
+    transition: opacity 0.25s ease-in-out;
 }
 
 .loading-indicator {
