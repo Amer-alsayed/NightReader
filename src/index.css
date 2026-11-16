@@ -157,7 +157,7 @@ body {
 /* By inverting colors and hue-rotating we keep images somewhat natural but turn white background to black */
 /* contrast to soften the text, brightness to prevent blazing bright colors */
 .pdf-dark-mode-canvas {
-  filter: invert(1) hue-rotate(180deg) brightness(0.85);
+  filter: invert(1) hue-rotate(180deg) contrast(1.05) brightness(0.95);
   transition: filter var(--transition-normal);
 }
 

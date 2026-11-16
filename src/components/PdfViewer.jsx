@@ -10,16 +10,14 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
 ).toString();
 
 const MAX_CANVAS_DIM = 4096;
-const MIN_BACKING_WIDTH = 1440;
 
-// Computes a high-DPI supersampling factor so PDF text and diagrams stay razor-sharp
-// even in narrow split-screen viewports or 1x displays, while staying within GPU canvas limits.
+// Use exact devicePixelRatio (capped by GPU canvas limits) so canvas pixels map 1:1
+// to physical screen pixels without fractional downsampling blur.
 const computeOutputScale = (cssW, cssH) => {
     const dpr = window.devicePixelRatio || 1;
-    const desired = Math.max(dpr, 2, MIN_BACKING_WIDTH / Math.max(cssW, 1));
     const maxW = MAX_CANVAS_DIM / Math.max(cssW, 1);
     const maxH = MAX_CANVAS_DIM / Math.max(cssH, 1);
-    return Math.max(1, Math.min(desired, maxW, maxH, 4));
+    return Math.max(1, Math.min(dpr, maxW, maxH));
 };
 
 // Computes the render scale and exact CSS size for a page.
@@ -135,8 +133,8 @@ const ScrollPageCanvas = ({ pdfDoc, pageNumber, scale, isDarkMode, containerWidt
                 const ctx = canvas.getContext('2d');
                 const outputScale = computeOutputScale(L.cssW, L.cssH);
 
-                const targetW = Math.floor(L.cssW * outputScale);
-                const targetH = Math.floor(L.cssH * outputScale);
+                const targetW = Math.round(L.cssW * outputScale);
+                const targetH = Math.round(L.cssH * outputScale);
 
                 if (Math.abs(canvas.width - targetW) > 5) {
                     setIsRendered(false);
@@ -144,8 +142,11 @@ const ScrollPageCanvas = ({ pdfDoc, pageNumber, scale, isDarkMode, containerWidt
 
                 canvas.width = targetW;
                 canvas.height = targetH;
-                canvas.style.width = L.cssW + 'px';
-                canvas.style.height = L.cssH + 'px';
+                canvas.style.width = (targetW / outputScale) + 'px';
+                canvas.style.height = (targetH / outputScale) + 'px';
+
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
 
                 const transform = [outputScale, 0, 0, outputScale * L.yStretch, 0, 0];
                 if (renderTaskRef.current) {
@@ -199,7 +200,8 @@ const PdfViewer = ({ file, onClose }) => {
     const [pageInputValue, setPageInputValue] = useState('1');
 
     const [isFullscreen, setIsFullscreen] = useState(false);
-    const [fitMode, setFitMode] = useState('page');
+    const [fitMode, setFitMode] = useState(() => (window.innerWidth < 900 ? 'width' : 'page'));
+    const [effectiveScale, setEffectiveScale] = useState(1.0);
     const [isToolbarVisible, setIsToolbarVisible] = useState(true);
     const [focusModeUserOverride, setFocusModeUserOverride] = useState(false);
     const [windowSize, setWindowSize] = useState({ w: window.innerWidth, h: window.innerHeight });
@@ -323,21 +325,28 @@ const PdfViewer = ({ file, onClose }) => {
 
                 const container = containerRef.current;
                 const L = computeLayout(page, fitMode, scale, container?.clientWidth, container?.clientHeight);
+                setEffectiveScale(L.renderScale);
                 const viewport = page.getViewport({ scale: L.renderScale });
                 const canvas = canvasRef.current;
                 const ctx = canvas.getContext('2d');
-                const dpr = window.devicePixelRatio || 1;
+                const outputScale = computeOutputScale(L.cssW, L.cssH);
 
-                if (Math.abs(canvas.width - Math.floor(L.cssW * dpr)) > 5) {
+                const targetW = Math.round(L.cssW * outputScale);
+                const targetH = Math.round(L.cssH * outputScale);
+
+                if (Math.abs(canvas.width - targetW) > 5) {
                     canvas.style.opacity = '0';
                 }
 
-                canvas.width = Math.floor(L.cssW * dpr);
-                canvas.height = Math.floor(L.cssH * dpr);
-                canvas.style.width = L.cssW + 'px';
-                canvas.style.setProperty('height', L.cssH + 'px', 'important');
+                canvas.width = targetW;
+                canvas.height = targetH;
+                canvas.style.width = (targetW / outputScale) + 'px';
+                canvas.style.height = (targetH / outputScale) + 'px';
 
-                const transform = [dpr, 0, 0, dpr * L.yStretch, 0, 0];
+                ctx.imageSmoothingEnabled = true;
+                ctx.imageSmoothingQuality = 'high';
+
+                const transform = [outputScale, 0, 0, outputScale * L.yStretch, 0, 0];
                 if (renderTaskRef.current) {
                     try { await renderTaskRef.current.cancel(); } catch (e) { }
                 }
@@ -606,9 +615,9 @@ const PdfViewer = ({ file, onClose }) => {
 
                 {/* Zoom */}
                 <div className="zoom-controls">
-                    <button className="btn btn-icon" onClick={zoomOut} disabled={scale <= 0.5}><ZoomOut size={20} /></button>
-                    <span className="zoom-info">{Math.round(scale * 100)}%</span>
-                    <button className="btn btn-icon" onClick={zoomIn} disabled={scale >= 3.0}><ZoomIn size={20} /></button>
+                    <button className="btn btn-icon" onClick={zoomOut} disabled={(fitMode === 'custom' ? scale : effectiveScale) <= 0.5}><ZoomOut size={20} /></button>
+                    <span className="zoom-info">{Math.round((fitMode === 'custom' ? scale : effectiveScale) * 100)}%</span>
+                    <button className="btn btn-icon" onClick={zoomIn} disabled={(fitMode === 'custom' ? scale : effectiveScale) >= 3.0}><ZoomIn size={20} /></button>
                 </div>
 
                 <div className="toolbar-divider"></div>
